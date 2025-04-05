@@ -82,49 +82,58 @@ class Residual1DCNN(nn.Module):
 ################################################################################
 # Required Functions
 ################################################################################
+from torch.utils.data import Dataset, DataLoader
+
+# Custom Dataset
+class ECGDataset(Dataset):
+    def __init__(self, data_folder, records):
+        self.data_folder = data_folder
+        self.records = records
+
+    def __len__(self):
+        return len(self.records)
+
+    def __getitem__(self, idx):
+        record_path = os.path.join(self.data_folder, self.records[idx])
+        x = preprocess(record_path)
+        y = load_label(record_path)
+        return torch.tensor(x).unsqueeze(0), torch.tensor(y, dtype=torch.float32)
 
 def train_model(data_folder, model_folder, verbose):
     if verbose:
-        print("Loading and preprocessing data...")
+        print("Loading record names...")
 
     records = find_records(data_folder)
-    X_raw, y = [], []
-
-    for rec in records:
-        record_path = os.path.join(data_folder, rec)
-        x = preprocess(record_path)
-        X_raw.append(x)
-        y.append(load_label(record_path))
-
-    X_raw = np.array(X_raw)
-    y = np.array(y).astype(np.float32)
-
-    X_tensor = torch.tensor(X_raw).unsqueeze(1).float()
-    y_tensor = torch.tensor(y).unsqueeze(1).float()
+    dataset = ECGDataset(data_folder, records)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
 
     model = Residual1DCNN(input_channels=1, input_length=1000, num_classes=1)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.BCELoss()
 
-    if verbose:
-        print("Training Residual 1D CNN...")
-
     model.train()
+    if verbose:
+        print("Training model using DataLoader...")
+
     for epoch in range(10):
-        optimizer.zero_grad()
-        output = model(X_tensor)
-        loss = criterion(output, y_tensor)
-        loss.backward()
-        optimizer.step()
+        epoch_loss = 0.0
+        for x_batch, y_batch in dataloader:
+            optimizer.zero_grad()
+            output = model(x_batch)
+            loss = criterion(output, y_batch.unsqueeze(1))
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
 
         if verbose:
-            print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
+            print(f"Epoch {epoch+1}, Avg Loss: {epoch_loss / len(dataloader):.4f}")
 
     os.makedirs(model_folder, exist_ok=True)
     save_model(model_folder, model)
 
     if verbose:
-        print("Model saved.")
+        print("Model training completed and saved.")
+
 
 def load_model(model_folder, verbose):
     model = Residual1DCNN(input_channels=1, input_length=1000, num_classes=1)
