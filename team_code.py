@@ -17,6 +17,16 @@ import sys
 
 from helper_code import *
 
+import tensorflow as tf
+from tensorflow.keras import layers, models
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+from torch.utils.data import DataLoader, TensorDataset
+
 ################################################################################
 #
 # Required functions. Edit these functions to add your code, but do not change the arguments for the functions.
@@ -26,60 +36,115 @@ from helper_code import *
 # Train your models. This function is *required*. You should edit this function to add your code, but do *not* change the arguments
 # of this function. If you do not train one of the models, then you can return None for the model.
 
+def preprocess_signal(signal, target_length=5000):
+    """Pad or truncate the signal to a fixed length."""
+    num_samples, num_channels = signal.shape
+    if num_samples > target_length:
+        preprocess_signal.truncated += 1
+        return signal[:target_length]
+    elif num_samples < target_length:
+        preprocess_signal.padded += 1
+        pad_width = target_length - num_samples
+        return np.pad(signal, ((0, pad_width), (0, 0)), 'constant')
+    else:
+        return signal
+
+# Track counts
+preprocess_signal.truncated = 0
+preprocess_signal.padded = 0
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
     # Find the data files.
     if verbose:
         print('Finding the Challenge data...')
-
     records = find_records(data_folder)
     num_records = len(records)
-
     if num_records == 0:
         raise FileNotFoundError('No data were provided.')
 
-    # Extract the features and labels from the data.
     if verbose:
-        print('Extracting features and labels from the data...')
+        print('Loading, normalizing, and processing the data...')
 
-    features = np.zeros((num_records, 6), dtype=np.float64)
-    labels = np.zeros(num_records, dtype=bool)
+    signals_list = []
+    for recording in recordings:
+        signal, header = load_challenge_data(recording)
+        signal = preprocess_signal(signal)
+        signals_list.append(signal)
 
-    # Iterate over the records.
+# Convert to array after uniform shape ensured
+    signals = np.array(signals_list, dtype=np.float32)
+
+# Print stats
+    print(f"[INFO] Padded signals: {preprocess_signal.padded}")
+    print(f"[INFO] Truncated signals: {preprocess_signal.truncated}")
+
+    
+    labels_list = []
     for i in range(num_records):
         if verbose:
             width = len(str(num_records))
             print(f'- {i+1:>{width}}/{num_records}: {records[i]}...')
+        record_path = os.path.join(data_folder, records[i])
+        # load_signals returns (num_leads, num_samples)
+        signal, fields = load_signals(record_path)
+        # Transpose to (num_samples, num_leads)
+        signal = signal.T
 
-        record = os.path.join(data_folder, records[i])
-        features[i] = extract_features(record)
-        labels[i] = load_label(record)
+        # Z normalization per channel: subtract mean and divide by std (avoid division by zero)
+        channel_mean = np.mean(signal, axis=0)
+        channel_std = np.std(signal, axis=0) + 1e-8
+        signal_norm = (signal - channel_mean) / channel_std
 
-    # Train the models.
+        signals_list.append(signal_norm)
+        labels_list.append(load_label(record_path))
+
+    # Convert lists to arrays.
+    # Assuming all signals have the same shape (num_samples, num_leads)
+    signals = np.array(signals_list, dtype=np.float32)
+    labels = np.array(labels_list, dtype=np.float32)
+
     if verbose:
-        print('Training the model on the data...')
+        print(f'Loaded {signals.shape[0]} records with shape {signals.shape[1:]} each.')
 
-    # This very simple model trains a random forest model with very simple features.
+    # Build a Conv1D-based classifier that includes an "encoder" (i.e. autoencoder-like feature extractor)
+    input_shape = signals.shape[1:]  # (num_samples, num_leads)
+    latent_dim = 128  # Size of the encoded representation
 
-    # Define the parameters for the random forest classifier and regressor.
-    n_estimators = 12  # Number of trees in the forest.
-    max_leaf_nodes = 34  # Maximum number of leaf nodes in each tree.
-    random_state = 56  # Random state; set for reproducibility.
+    inputs = layers.Input(shape=input_shape)
 
-    # Fit the model.
-    model = RandomForestClassifier(
-        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, labels)
+    x = layers.Conv1D(32, kernel_size=5, padding='same', activation='relu')(inputs)
+    x = layers.MaxPooling1D(pool_size=2)(x)
+    x = layers.Conv1D(64, kernel_size=5, padding='same', activation='relu')(x)
+    x = layers.MaxPooling1D(pool_size=2)(x)
+    x = layers.GlobalAveragePooling1D()(x)
+    latent = layers.Dense(latent_dim, activation='relu', name='encoder')(x)
+    outputs = layers.Dense(1, activation='sigmoid')(latent)
 
-    # Create a folder for the model if it does not already exist.
+    model = models.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    if verbose:
+        model.summary()
+
+    if verbose:
+        print('Training the Conv1D model...')
+    model.fit(signals, labels, epochs=10, batch_size=16, verbose=1)
+
+    # Save the model using the Keras save format.
     os.makedirs(model_folder, exist_ok=True)
-
-    # Save the model.
-    save_model(model_folder, model)
-
+    save_path = os.path.join(model_folder, 'model.h5')
+    model.save(save_path)
     if verbose:
+        print(f'Model saved to {save_path}')
         print('Done.')
         print()
 
+def load_model(model_folder, verbose):
+
+    model_path = os.path.join(model_folder, 'model.h5')
+    model = tf.keras.models.load_model(model_path)
+    if verbose:
+        print(f'Loaded model from {model_path}')
+    return model
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function. If you do not train one of the models, then you can return None for the model.
 def load_model(model_folder, verbose):
@@ -90,17 +155,20 @@ def load_model(model_folder, verbose):
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_model(record, model, verbose):
-    # Load the model.
-    model = model['model']
+    # Given a record path, load the signal, preprocess it, and run the model.
+    # load_signals returns (num_leads, num_samples)
+    signal, fields = load_signals(record)
+    # Transpose to (num_samples, num_leads)
+    signal = signal.T
+    # Z normalization per channel.
+    channel_mean = np.mean(signal, axis=0)
+    channel_std = np.std(signal, axis=0) + 1e-8
+    signal_norm = (signal - channel_mean) / channel_std
 
-    # Extract the features.
-    features = extract_features(record)
-    features = features.reshape(1, -1)
-
-    # Get the model outputs.
-    binary_output = model.predict(features)[0]
-    probability_output = model.predict_proba(features)[0][1]
-
+    # Expand dimensions to form a batch of 1.
+    input_signal = np.expand_dims(signal_norm, axis=0).astype(np.float32)
+    probability_output = model.predict(input_signal)[0][0]
+    binary_output = 1 if probability_output >= 0.5 else 0
     return binary_output, probability_output
 
 ################################################################################
