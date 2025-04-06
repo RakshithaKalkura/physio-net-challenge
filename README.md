@@ -65,7 +65,7 @@ We employ a **Residual 1D Convolutional Neural Network (ResNet1D)** tailored for
    - Pad or crop to 1000 time steps
 2. **Training**:
    - Adam optimizer + BCELoss
-   - Batch size = 16, 10 epochs
+   - Batch size = 16, 50 epochs
 3. **Inference**:
    - Predict binary output & probability
 
