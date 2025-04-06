@@ -1,14 +1,11 @@
-# George B. Moody PhysioNet Challenge 2025
+# George B. Moody PhysioNet Challenge 2025 - Team Name: **neuron_binders**
 
-## What's in this repository?
+## 🫀 PhysioNet Challenge - Chagas Disease Detection
+This repository contains code for detecting Chagas disease using ECG signals. We use a Residual 1D CNN model for binary classification and participate in the [George B. Moody PhysioNet Challenge 2025](https://physionetchallenges.org/2025/).
 
-This repository contains a simple example that illustrates how to format a Python entry for the [George B. Moody PhysioNet Challenge 2025](https://physionetchallenges.org/2025/). If you are participating in the 2025 Challenge, then we recommend using this repository as a template for your entry. You can remove some of the code, reuse other code, and add new code to create your entry. You do not need to use the models, features, and/or libraries in this example for your entry. We encourage a diversity of approaches to the Challenges.
+## How to run?
 
-For this example, we implemented a random forest model with several simple features. (This simple example is **not** designed to perform well, so you should **not** use it as a baseline for your approach's performance.) You can try it by running the following commands on the Challenge training set. If you are using a relatively recent personal computer, then you should be able to run these commands from start to finish on a small subset (1000 records) of the training data in a few minutes or less.
-
-## How do I run these scripts?
-
-First, you can download and create data for these scripts by following the [instructions](https://github.com/physionetchallenges/python-example-2025?tab=readme-ov-file#how-do-i-create-data-for-these-scripts) in the following section.
+First, clone the repository and download the necessary data.
 
 Second, you can install the dependencies for these scripts by creating a Docker image (see below) or [virtual environment](https://docs.python.org/3/library/venv.html) and running
 
@@ -47,7 +44,38 @@ where
 
 You can use the provided training set for the `training_data` and `holdout_data` files, but we will use different datasets for the validation and test sets, and we will not provide the labels to your code.
 
-## How do I create data for these scripts?
+## Architecture and Approach
+
+### Model Architecture
+
+We employ a **Residual 1D Convolutional Neural Network (ResNet1D)** tailored for ECG time-series input:
+
+- **Residual Blocks**:
+  - 3 layers (16 → 32 → 64 channels)
+  - Shortcut connections for stable gradient flow
+- **Pooling Layers**:
+  - MaxPooling and AdaptiveAvgPooling
+- **Final Layer**:
+  - Fully connected layer + Sigmoid for binary classification
+
+### Approach Summary
+
+1. **Preprocessing**:
+   - Handle NaNs, normalize input
+   - Pad or crop to 1000 time steps
+2. **Training**:
+   - Adam optimizer + BCELoss
+   - Batch size = 16, 10 epochs
+3. **Inference**:
+   - Predict binary output & probability
+
+### Future Enhancements
+
+- Add Autoencoder-based preprocessing
+- Incorporate Attention layers
+- Expand to multi-label disease classification
+
+## How to create data for these scripts?
 
 You can use the scripts in this repository to convert the [CODE-15% dataset](https://zenodo.org/records/4916206), the [SaMi-Trop dataset](https://zenodo.org/records/4905618), and the [PTB-XL dataset](https://physionet.org/content/ptb-xl/) to [WFDB](https://wfdb.io/) format.
 
@@ -100,33 +128,8 @@ These instructions use `ptbxl_input` as the path for the input data files and `p
             -d ptbxl_input/ptbxl_database.csv \
             -o ptbxl_output
 
-## Which scripts I can edit?
-
-Please edit the following script to add your code:
-
-* `team_code.py` is a script with functions for training and running your trained model.
-
-Please do **not** edit the following scripts. We will use the unedited versions of these scripts when running your code:
-
-* `train_model.py` is a script for training your model.
-* `run_model.py` is a script for running your trained model.
-* `helper_code.py` is a script with helper functions that we used for our code. You are welcome to use them in your code.
-
-These scripts must remain in the root path of your repository, but you can put other scripts and other files elsewhere in your repository.
-
-## How do I train, save, load, and run my model?
-
-To train and save your model, please edit the `train_model` function in the `team_code.py` script. Please do not edit the input or output arguments of this function.
-
-To load and run your trained model, please edit the `load_model` and `run_model` functions in the `team_code.py` script. Please do not edit the input or output arguments of these functions.
 
 ## How do I run these scripts in Docker?
-
-Docker and similar platforms allow you to containerize and package your code with specific dependencies so that your code can be reliably run in other computational environments.
-
-To increase the likelihood that we can run your code, please [install](https://docs.docker.com/get-docker/) Docker, build a Docker image from your code, and run it on the training data. To quickly check your code for bugs, you may want to run it on a small subset of the training data, such as 1000 records.
-
-If you have trouble running your code, then please try the follow steps to run the example code.
 
 1. Create a folder `example` in your home directory with several subfolders.
 
@@ -172,18 +175,23 @@ If you have trouble running your code, then please try the follow steps to run t
         root@[...]:/challenge# exit
         Exit
 
-## What else do I need?
+## Acknowledgements
+We would like to express our sincere gratitude to the organizers of the George B. Moody PhysioNet Challenge 2025 for providing access to high-quality physiological datasets and fostering a platform for impactful research in biomedical signal processing.
 
-This repository does not include code for evaluating your entry. Please see the [evaluation code repository](https://github.com/physionetchallenges/evaluation-2025) for code and instructions for evaluating your entry using the Challenge scoring metric.
+The challenge serves as an excellent opportunity for students, researchers, and practitioners to contribute toward improving clinical decision-making using open-source tools and reproducible science.
 
-## How do I learn more? How do I share more?
+We acknowledge the use of the following publicly available datasets:
+- CODE-15% ECG Dataset
+- SaMi-Trop Chagas Disease Dataset
+- PTB-XL ECG Dataset
 
-Please see the [Challenge website](https://physionetchallenges.org/2025/) for more details. Please post questions and concerns on the [Challenge discussion forum](https://groups.google.com/forum/#!forum/physionet-challenges). Please do not make pull requests, which may share information about your approach.
+We also thank the PhysioNet team for their continuous efforts in supporting the biomedical AI community.
 
-## Useful links
+## Contributors
+Team Name: **neuron_binders**
+Affiliation: National Institute of Technology Goa
+Team Members:
+- **Rakshitha Kalkura**
+- **Aditya Ranjan Sharma**
 
-* [Challenge website](https://physionetchallenges.org/2025/)
-* [MATLAB example code](https://github.com/physionetchallenges/matlab-example-2025)
-* [Evaluation code](https://github.com/physionetchallenges/evaluation-2025)
-* [Frequently asked questions (FAQ) for this year's Challenge](https://physionetchallenges.org/2025/faq/)
-* [Frequently asked questions (FAQ) about the Challenges in general](https://physionetchallenges.org/faq/)
+We collaborated on data preprocessing, model development, training strategies, and evaluation techniques for the George B. Moody PhysioNet Challenge 2025. Our approach aims to advance automated detection of Chagas disease using ECG signals.
