@@ -115,7 +115,7 @@ def train_model(data_folder, model_folder, verbose):
     if verbose:
         print("Training model using DataLoader...")
 
-    for epoch in range(50):
+    for epoch in range(25):
         epoch_loss = 0.0
         for x_batch, y_batch in dataloader:
             optimizer.zero_grad()
