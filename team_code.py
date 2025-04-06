@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# This is your main PhysioNet team code script using a Residual 1D CNN for binary classification.
+# This is the main PhysioNet team code script using a Residual 1D CNN for binary classification.
 
 import os
 import numpy as np
