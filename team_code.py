@@ -128,6 +128,9 @@ def train_model(data_folder, model_folder, verbose):
         if verbose:
             print(f"Epoch {epoch+1}, Avg Loss: {epoch_loss / len(dataloader):.4f}")
 
+    if os.path.exists(model_folder) and not os.path.isdir(model_folder):
+        os.remove(model_folder)
+
     os.makedirs(model_folder, exist_ok=True)
     save_model(model_folder, model)
 
