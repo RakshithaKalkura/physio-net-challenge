@@ -4,7 +4,8 @@ pandas==2.2.2
 scikit-learn==1.6.0
 wfdb==4.1.2
 h5py==3.12.1
-torch==2.6.0
-torchvision
-torchaudio
-optree>=0.13.0
+#torch==2.6.0
+#torchvision
+#torchaudio
+#optree>=0.13.0
+tensorflow>=2.8.0

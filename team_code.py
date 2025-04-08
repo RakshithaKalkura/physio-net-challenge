@@ -1,186 +1,134 @@
-#!/usr/bin/env python
-
-# This is the main PhysioNet team code script using a Residual 1D CNN for binary classification.
-
 import os
 import numpy as np
-import torch
-import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
-from helper_code import *
+from tensorflow.keras.models import load_model as keras_load_model
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.optimizers import Adam
+from model import get_model  
+import wfdb
+from keras.layers import Dense
+from keras.activations import sigmoid
 
-################################################################################
-# Preprocessing
-################################################################################
 
-def preprocess(record_path):
-    signal, _ = load_signals(record_path)
-    signal = np.nan_to_num(signal)
 
-    if signal.ndim > 1:
-        signal = np.mean(signal, axis=0)
+SIGNAL_LENGTH = 4096
+NUM_LEADS = 12
+NUM_CLASSES = 1 #chagas yes or no
+TARGET_FS = 500   # Set based on your task
 
-    signal = signal[:1000] if len(signal) > 1000 else np.pad(signal, (0, 1000 - len(signal)))
-    signal = (signal - np.mean(signal)) / (np.std(signal) + 1e-8)
+from scipy.signal import resample
 
-    return signal.astype(np.float32)
+def z_normalize(signal):
+    mean = np.mean(signal, axis=0)
+    std = np.std(signal, axis=0)
+    std[std == 0] = 1e-6  # prevent division by zero
+    return (signal - mean) / std
 
-################################################################################
-# Residual 1D CNN
-################################################################################
+def load_challenge_data(data_folder, max_samples=None):
+    signals = []
+    labels = []
 
-class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, downsample=False):
-        super(ResidualBlock, self).__init__()
-        padding = kernel_size // 2
-        self.downsample = downsample
+    for i, file in enumerate(os.listdir(data_folder)):
+        if file.endswith('.hea'):
+            if max_samples and len(signals) >= max_samples:
+                break
 
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, bias=False)
-        self.bn1 = nn.BatchNorm1d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
+            record_name = file[:-4]
+            record_path = os.path.join(data_folder, record_name)
 
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=1, padding=padding, bias=False)
-        self.bn2 = nn.BatchNorm1d(out_channels)
+            try:
+                record = wfdb.rdrecord(record_path)
+                signal = record.p_signal
+                fs = record.fs
 
-        if self.downsample or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm1d(out_channels)
-            )
-        else:
-            self.shortcut = nn.Identity()
+                # Resample
+                if fs != TARGET_FS:
+                    num_samples = int(signal.shape[0] * TARGET_FS / fs)
+                    signal = resample(signal, num_samples, axis=0)
 
-    def forward(self, x):
-        identity = self.shortcut(x)
-        out = self.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += identity
-        return self.relu(out)
+                # Pad/truncate
+                if signal.shape[0] > SIGNAL_LENGTH:
+                    signal = signal[:SIGNAL_LENGTH]
+                elif signal.shape[0] < SIGNAL_LENGTH:
+                    pad_width = SIGNAL_LENGTH - signal.shape[0]
+                    signal = np.pad(signal, ((0, pad_width), (0, 0)), 'constant')
 
-class Residual1DCNN(nn.Module):
-    def __init__(self, input_channels=1, input_length=1000, num_classes=1):
-        super(Residual1DCNN, self).__init__()
-        self.layer1 = ResidualBlock(input_channels, 16, kernel_size=7)
-        self.pool1 = nn.MaxPool1d(2)
+                signal = z_normalize(signal).astype(np.float32)
 
-        self.layer2 = ResidualBlock(16, 32)
-        self.pool2 = nn.MaxPool1d(2)
+                signals.append(signal)
+                labels.append(0)  # Replace with actual label
 
-        self.layer3 = ResidualBlock(32, 64)
-        self.pool3 = nn.AdaptiveAvgPool1d(1)
+            except Exception as e:
+                print(f"Error loading {record_name}: {e}")
+                continue
 
-        self.fc = nn.Linear(64, num_classes)
-        self.sigmoid = nn.Sigmoid()
+    return np.array(signals, dtype=np.float32), np.array(labels)
 
-    def forward(self, x):
-        x = self.pool1(self.layer1(x))
-        x = self.pool2(self.layer2(x))
-        x = self.pool3(self.layer3(x))
-        x = x.view(x.size(0), -1)
-        return self.sigmoid(self.fc(x))
 
-################################################################################
-# Required Functions
-################################################################################
-from torch.utils.data import Dataset, DataLoader
 
-# Custom Dataset
-class ECGDataset(Dataset):
-    def __init__(self, data_folder, records):
-        self.data_folder = data_folder
-        self.records = records
-
-    def __len__(self):
-        return len(self.records)
-
-    def __getitem__(self, idx):
-        record_path = os.path.join(self.data_folder, self.records[idx])
-        x = preprocess(record_path)
-        y = load_label(record_path)
-        return torch.tensor(x).unsqueeze(0), torch.tensor(y, dtype=torch.float32)
-
-def train_model(data_folder, model_folder, verbose):
-    if verbose:
-        print("Loading record names...")
-
-    records = find_records(data_folder)
-    dataset = ECGDataset(data_folder, records)
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=0)
-
-    model = Residual1DCNN(input_channels=1, input_length=1000, num_classes=1)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.BCELoss()
-
-    model.train()
-    if verbose:
-        print("Training model using DataLoader...")
-
-    for epoch in range(50):
-        epoch_loss = 0.0
-        for x_batch, y_batch in dataloader:
-            optimizer.zero_grad()
-            output = model(x_batch)
-            loss = criterion(output, y_batch.unsqueeze(1))
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-
-        if verbose:
-            print(f"Epoch {epoch+1}, Avg Loss: {epoch_loss / len(dataloader):.4f}")
-
-    if os.path.exists(model_folder) and not os.path.isdir(model_folder):
-        os.remove(model_folder)
-
+def train_model(data_folder, model_folder, verbose=False):
     os.makedirs(model_folder, exist_ok=True)
-    save_model(model_folder, model)
 
-    if verbose:
-        print("Model training completed and saved.")
+    if verbose: print("Loading data...")
+    X, y = load_challenge_data(data_folder, max_samples=20000) # add max_samples if needed
+    X = X.astype(np.float32)
+    y = y.astype(np.float32)
+    y = y.reshape(-1, 1)
+
+    print("Data shape:", X.shape, y.shape)
+
+    if verbose: print("Building model...")
+    model = get_model(NUM_CLASSES, last_layer='sigmoid')
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
 
-def load_model(model_folder, verbose):
-    model = Residual1DCNN(input_channels=1, input_length=1000, num_classes=1)
-    model.load_state_dict(torch.load(os.path.join(model_folder, 'model.pth'), map_location=torch.device('cpu'), weights_only=False))
-    model.eval()
-    return {'model': model}
 
-def run_model(record, model, verbose):
-    model = model['model']
-    x = preprocess(record)
-    x_tensor = torch.tensor(x).unsqueeze(0).unsqueeze(0).float()
+    checkpoint_path = os.path.join(model_folder, 'best_model.keras')
+    checkpoint = ModelCheckpoint(checkpoint_path, save_best_only=True, monitor='val_loss', mode='min')
 
-    with torch.no_grad():
-        prob = model(x_tensor).item()
+    if verbose: print("Training...")
+    model.fit(X, y, epochs=10, batch_size=16, validation_split=0.1, callbacks=[checkpoint], verbose=1 if verbose else 0)
 
-    binary_output = prob > 0.5
-    return binary_output, prob
+    model.save(os.path.join(model_folder, 'model.keras'))
+    if verbose: print("Model saved to", model_folder)
 
-################################################################################
-# Optional Features (if needed later)
-################################################################################
 
-def save_model(model_folder, model):
-    d = {'model': model}
-    filename = os.path.join(model_folder, 'model.pth')
-    torch.save(model.state_dict(), filename)
-
-def extract_features(record):
-    header = load_header(record)
-    age = get_age(header)
-    sex = get_sex(header)
-
-    one_hot_encoding_sex = np.zeros(3, dtype=bool)
-    if sex == 'Female':
-        one_hot_encoding_sex[0] = 1
-    elif sex == 'Male':
-        one_hot_encoding_sex[1] = 1
+def load_model(model_folder, verbose=False):
+    model_path = os.path.join(model_folder, 'model.keras')
+    if os.path.exists(model_path):
+        model = keras_load_model(model_path)
+        if verbose:
+            print(f"Loaded model from {model_path}")
+        return {'model': model}
     else:
-        one_hot_encoding_sex[2] = 1
+        raise FileNotFoundError(f"Model not found at {model_path}")
 
-    signal, fields = load_signals(record)
-    num_finite_samples = np.size(np.isfinite(signal))
-    signal_mean = np.nanmean(signal) if num_finite_samples > 0 else 0.0
-    signal_std = np.nanstd(signal) if num_finite_samples > 1 else 0.0
 
-    features = np.concatenate(([age], one_hot_encoding_sex, [signal_mean, signal_std]))
-    return np.asarray(features, dtype=np.float32)
+def run_model(record_path, model, verbose=False):
+    try:
+        if model is None or 'model' not in model:
+            raise ValueError("Model not properly loaded")
+
+        signal, _ = wfdb.rdsamp(record_path)
+        signal = signal[:SIGNAL_LENGTH, :NUM_LEADS]
+
+        if signal.shape[0] < SIGNAL_LENGTH:
+            pad_width = SIGNAL_LENGTH - signal.shape[0]
+            signal = np.pad(signal, ((0, pad_width), (0, 0)), mode='constant')
+        elif signal.shape[0] > SIGNAL_LENGTH:
+            signal = signal[:SIGNAL_LENGTH, :]
+
+        if signal.shape[1] < NUM_LEADS:
+            lead_pad = NUM_LEADS - signal.shape[1]
+            signal = np.pad(signal, ((0, 0), (0, lead_pad)), mode='constant')
+
+        signal = np.expand_dims(signal.astype(np.float32), axis=0)
+        model_instance = model['model']
+        prediction = model_instance.predict(signal)[0]
+        binary_prediction = (prediction >= 0.5).astype(int)
+
+        return binary_prediction, prediction
+
+    except Exception as e:
+        if verbose:
+            print(f"Error in run_model: {e}")
+        return np.zeros(NUM_CLASSES), np.zeros(NUM_CLASSES)
