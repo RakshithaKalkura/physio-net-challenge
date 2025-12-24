@@ -188,9 +188,9 @@ We acknowledge the use of the following publicly available datasets:
 We also thank the PhysioNet team for their continuous efforts in supporting the biomedical AI community.
 
 ## Contributors
-Team Name: **neuron_binders**
-Affiliation: National Institute of Technology Goa
-Team Members:
+Team Name: **neuron_binders** <br>
+Affiliation: National Institute of Technology Goa <br>
+Team Members: <br>
 - **Rakshitha Kalkura**
 - **Aditya Ranjan Sharma**
 
